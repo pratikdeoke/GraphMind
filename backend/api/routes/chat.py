@@ -8,7 +8,32 @@ from services.evaluation.answer_quality_evaluator import AnswerQualityEvaluator
 from services.database.chat_service import ChatService
 from services.database.user_service import UserService
 from services.auth.auth_service import auth_service
+from services.export.classifier import classify_response
+from services.export.extractor import extract_table
 from pydantic import BaseModel
+
+
+def build_export_fields(retrieved_nodes, response_text):
+    """Classify a response and extract export table data.
+
+    Returns a dict of (response_type, exportable, export_data) suitable for
+    spreading into a ChatResponse payload. Never raises: export metadata must
+    not break chat.
+    """
+    try:
+        classification = classify_response(retrieved_nodes or [], response_text)
+        export_data = None
+        if classification["response_type"] in ("structured", "mixed"):
+            table = extract_table(retrieved_nodes or [], response_text)
+            if table.get("headers") and table.get("rows"):
+                export_data = table
+        return {
+            "response_type": classification["response_type"],
+            "exportable": classification["exportable"],
+            "export_data": export_data,
+        }
+    except Exception:
+        return {"response_type": "text", "exportable": ["copy"], "export_data": None}
 
 router = APIRouter()
 
@@ -140,6 +165,9 @@ async def chat_endpoint(
         response_data = ChatResponse(
             intent=IntentType.MEMORY,
             memory_storage=MemoryStorageResult(**storage_result),
+            response_type="text",
+            exportable=["copy"],
+            export_data=None,
             message=assistant_content
         )
 
@@ -174,6 +202,7 @@ async def chat_endpoint(
             retrieval_metrics=RetrievalMetrics(**metrics),
             memory_citations=typed_citations,
             answer_evaluation=AnswerEvaluation(**answer_eval_data),
+            **build_export_fields(memory_citations, answer),
             message="Answer generated successfully."
         )
 
@@ -215,6 +244,7 @@ async def chat_endpoint(
             retrieval_metrics=RetrievalMetrics(**metrics),
             memory_citations=typed_citations,
             answer_evaluation=AnswerEvaluation(**answer_eval_data),
+            **build_export_fields(memory_citations, answer),
             message="Memory stored and answer generated."
         )
 

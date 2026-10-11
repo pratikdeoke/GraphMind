@@ -126,6 +126,16 @@ class AnswerEvaluation(BaseModel):
     summary: str = Field(..., description="Human-readable quality summary.")
 
 
+class ExportTableData(BaseModel):
+    """Tabular data extracted from structured graph nodes for export."""
+    headers: List[str] = Field(
+        default_factory=list, description="Column headers for the export table.")
+    rows: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Table rows keyed by header name.")
+    node_type: Optional[str] = Field(
+        default=None, description="Dominant structured node type of the table.")
+
+
 class ChatResponse(BaseModel):
     """Response model for chat endpoint"""
     intent: IntentType
@@ -134,6 +144,20 @@ class ChatResponse(BaseModel):
     retrieval_metrics: Optional[RetrievalMetrics] = None
     memory_citations: Optional[List[MemoryCitation]] = None
     answer_evaluation: Optional[AnswerEvaluation] = None
+    response_type: str = Field(
+        default="text",
+        description="Export classification: structured, mixed, or text.",
+        example="structured"
+    )
+    exportable: List[str] = Field(
+        default_factory=lambda: ["copy"],
+        description="Allowed export formats for this response.",
+        example=["pdf", "excel", "copy"]
+    )
+    export_data: Optional[ExportTableData] = Field(
+        default=None,
+        description="Table data when the response has structured content."
+    )
     message: str
 
 

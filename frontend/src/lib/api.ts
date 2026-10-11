@@ -63,6 +63,15 @@ export interface AnswerEvaluation {
   summary: string;
 }
 
+export interface ExportTableData {
+  headers: string[];
+  rows: Array<Record<string, any>>;
+  node_type?: string | null;
+}
+
+export type ExportFormat = "pdf" | "excel" | "copy";
+export type ResponseType = "structured" | "mixed" | "text";
+
 export interface ChatApiResponse {
   intent: "MEMORY" | "QUESTION" | "BOTH";
   answer?: string;
@@ -77,6 +86,9 @@ export interface ChatApiResponse {
   };
   memory_citations?: Array<Record<string, unknown>>;
   answer_evaluation?: AnswerEvaluation;
+  response_type?: ResponseType;
+  exportable?: ExportFormat[];
+  export_data?: ExportTableData | null;
 }
 
 export const chatAPI = {
@@ -168,6 +180,36 @@ export const documentAPI = {
     formData.append("file", file);
     const response = await api.post("/documents/upload-and-ingest", formData, {
       headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  },
+};
+
+// Export API
+export const exportAPI = {
+  exportResponse: async (payload: {
+    response_text: string;
+    export_data?: ExportTableData | null;
+    format: "pdf" | "excel";
+    title: string;
+    user_id: string;
+  }): Promise<Blob> => {
+    const response = await api.post("/export/response", payload, {
+      responseType: "blob",
+    });
+    return response.data;
+  },
+
+  exportMemory: async (options: {
+    format: "pdf" | "excel";
+    stocks: boolean;
+    funds: boolean;
+    transactions: boolean;
+    chat: boolean;
+  }): Promise<Blob> => {
+    const response = await api.get("/export/memory", {
+      params: options,
+      responseType: "blob",
     });
     return response.data;
   },

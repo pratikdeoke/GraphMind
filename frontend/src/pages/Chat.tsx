@@ -1,8 +1,17 @@
 import React, { useState, useRef, useEffect } from "react";
 import Sidebar from "../components/Sidebar";
+import ExportBar from "../components/ExportBar";
+import BulkExportModal from "../components/BulkExportModal";
 import { userAPI } from "../lib/userAPI";
 import { useAuth } from "../contexts/AuthContext";
-import { chatAPI, documentAPI, type RetrievalMode } from "../lib/api";
+import {
+  chatAPI,
+  documentAPI,
+  type RetrievalMode,
+  type ExportFormat,
+  type ExportTableData,
+  type ResponseType,
+} from "../lib/api";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -34,6 +43,9 @@ interface Message {
   llm_generation_ms?: number;
   citations?: MemoryCitation[];
   answer_evaluation?: AnswerEvaluationMetrics;
+  response_type?: ResponseType;
+  exportable?: ExportFormat[];
+  export_data?: ExportTableData | null;
 }
 
 interface AnswerEvaluationMetrics {
@@ -503,6 +515,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [financialSummary, setFinancialSummary] = useState<{ 
     totalInvested: number; 
     totalAssets: number; 
@@ -653,6 +666,9 @@ export default function Chat() {
           llm_generation_ms: res.retrieval_metrics?.llm_generation_ms,
           citations: toMemoryCitations(res.memory_citations),
           answer_evaluation: res.answer_evaluation ?? undefined,
+          response_type: res.response_type,
+          exportable: res.exportable,
+          export_data: res.export_data ?? null,
         },
       ]);
     } catch {
@@ -681,7 +697,16 @@ export default function Chat() {
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--bg-base)" }}>
-      <Sidebar financialSummary={financialSummary} open={sidebarOpen} onToggle={() => setSidebarOpen((v) => !v)} />
+      <Sidebar
+        financialSummary={financialSummary}
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen((v) => !v)}
+        onExportClick={() => setExportModalOpen(true)}
+      />
+      <BulkExportModal
+        open={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+      />
       <div style={{ flex: 1, marginLeft: sidebarOpen ? 320 : 0, display: "flex", flexDirection: "column", height: "100vh", transition: "margin-left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)" }}>
       <header
         className="flex items-center justify-between shrink-0 z-10"
@@ -1107,6 +1132,16 @@ export default function Chat() {
                         )}
                     </div>
                   )}
+
+                {msg.role === "assistant" && (
+                  <ExportBar
+                    response_type={msg.response_type}
+                    exportable={msg.exportable}
+                    export_data={msg.export_data}
+                    response_text={msg.content}
+                    message_id={msg.id}
+                  />
+                )}
 
                 <p
                   style={{

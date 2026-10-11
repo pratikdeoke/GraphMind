@@ -11,9 +11,10 @@ interface SidebarProps {
   };
   open: boolean;
   onToggle: () => void;
+  onExportClick?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ financialSummary, open, onToggle }) => {
+const Sidebar: React.FC<SidebarProps> = ({ financialSummary, open, onToggle, onExportClick }) => {
   return (
     <>
       {/* Premium Toggle Button - Always Visible with Enhanced Design */}
@@ -89,6 +90,33 @@ const Sidebar: React.FC<SidebarProps> = ({ financialSummary, open, onToggle }) =
         {/* Financial Summary Section */}
         <div style={{ padding: open ? '1.8rem 1.4rem 1.2rem 1.4rem' : 0, borderBottom: open ? '1px solid rgba(139,92,246,0.12)' : 'none', opacity: open ? 1 : 0, transition: 'opacity 0.3s', overflowY: 'auto', maxHeight: open ? '55%' : 0 }}>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800, background: 'linear-gradient(135deg,#c4b5fd,#818cf8)', backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent', marginBottom: 14, letterSpacing: 0.4 }}>💰 Financial Overview</h2>
+
+          {onExportClick && (
+            <button
+              onClick={onExportClick}
+              style={{
+                width: '100%',
+                padding: '0.55rem 0.9rem',
+                marginBottom: 14,
+                background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))',
+                border: '1px solid rgba(139,92,246,0.25)',
+                borderRadius: 10,
+                color: '#c4b5fd',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.2))';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))';
+              }}
+            >
+              📥 Export Memory
+            </button>
+          )}
           
           {financialSummary.isEmpty ? (
             <div style={{ padding: '1.2rem 0.8rem', background: 'linear-gradient(135deg, rgba(139,92,246,0.08), rgba(99,102,241,0.05))', borderRadius: 12, border: '1px dashed rgba(139,92,246,0.2)', textAlign: 'center' }}>
