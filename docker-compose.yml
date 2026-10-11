@@ -1,0 +1,124 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: graphmind-postgres
+    environment:
+      POSTGRES_DB: graphmind
+      POSTGRES_USER: graphmind_user
+      POSTGRES_PASSWORD: graphmind_pass_2026
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graphmind_user -d graphmind"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - graphmind-network
+
+  neo4j:
+    image: neo4j:5.14.0
+    container_name: graphmind-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/graphmind123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_memory_heap_max__size: 2G
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - graphmind-network
+
+  milvus:
+    image: milvusdb/milvus:v2.3.5
+    container_name: graphmind-milvus
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      COMMON_STORAGETYPE: local
+      COMMON_LOG_LEVEL: info
+    ports:
+      - "19530:19530" # gRPC
+      - "9091:9091" # HTTP
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      etcd:
+        condition: service_started
+    restart: on-failure
+    command: milvus run standalone
+    networks:
+      - graphmind-network
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: graphmind-etcd
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd
+      -advertise-client-urls=http://etcd:2379
+      -listen-client-urls=http://0.0.0.0:2379
+      -listen-peer-urls=http://0.0.0.0:2380
+      -initial-advertise-peer-urls=http://etcd:2380
+      -initial-cluster=default=http://etcd:2380
+      -initial-cluster-state=new
+      -initial-cluster-token=etcd-cluster
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - etcd_data:/etcd
+    healthcheck:
+      test:
+        ["CMD", "etcdctl", "--endpoints=localhost:2379", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: on-failure
+    networks:
+      - graphmind-network
+
+volumes:
+  postgres_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  milvus_data:
+    driver: local
+  etcd_data:
+    driver: local
+
+networks:
+  graphmind-network:
+    driver: bridge
