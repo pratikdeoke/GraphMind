@@ -1,0 +1,507 @@
+openapi: 3.0.3
+info:
+  title: GraphMind API
+  version: 1.0.0
+  description: Financial Graph Memory RAG System
+servers:
+  - url: http://localhost:8001
+    description: Local backend
+
+tags:
+  - name: health
+    description: Service health endpoints
+  - name: authentication
+    description: User authentication endpoints
+  - name: chat
+    description: Chat and session endpoints
+  - name: memory
+    description: Memory graph visualization endpoints
+
+paths:
+  /:
+    get:
+      tags: [health]
+      summary: Root endpoint
+      responses:
+        '200':
+          description: Root metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  version:
+                    type: string
+                  docs:
+                    type: string
+                  health:
+                    type: string
+                  chat:
+                    type: string
+
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/signup:
+    post:
+      tags: [authentication]
+      summary: Create user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSignup'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
+        '400':
+          description: Email already registered
+
+  /auth/login:
+    post:
+      tags: [authentication]
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLogin'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
+        '401':
+          description: Incorrect email or password
+
+  /auth/me:
+    get:
+      tags: [authentication]
+      summary: Get current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Missing/invalid token
+        '404':
+          description: User not found
+
+  /chat:
+    post:
+      tags: [chat]
+      summary: Send chat message
+      description: Unified endpoint handling MEMORY, QUESTION, or BOTH intents.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '401':
+          description: Missing/invalid token
+        '404':
+          description: User not found
+
+  /sessions:
+    get:
+      tags: [chat]
+      summary: List user sessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: include_archived
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionResponse'
+        '401':
+          description: Missing/invalid token
+
+  /sessions/{session_id}/messages:
+    get:
+      tags: [chat]
+      summary: Get session messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Message list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MessageResponse'
+        '401':
+          description: Missing/invalid token
+        '403':
+          description: Session access denied
+
+  /sessions/{session_id}/archive:
+    post:
+      tags: [chat]
+      summary: Archive session
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionActionResponse'
+        '401':
+          description: Missing/invalid token
+        '404':
+          description: Session not found
+
+  /sessions/{session_id}:
+    delete:
+      tags: [chat]
+      summary: Delete session
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionActionResponse'
+        '401':
+          description: Missing/invalid token
+        '404':
+          description: Session not found
+
+  /memory/mindmap:
+    get:
+      tags: [memory]
+      summary: Get memory mindmap
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User graph for visualization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MindmapResponse'
+        '400':
+          description: User not linked to knowledge graph
+        '401':
+          description: Missing/invalid token
+        '404':
+          description: User not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          example: healthy
+        message:
+          type: string
+          example: API is running
+
+    UserSignup:
+      type: object
+      required: [email, password, full_name]
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          minLength: 6
+          example: secret123
+        full_name:
+          type: string
+          example: Tanmay Sharma
+
+    UserLogin:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          example: secret123
+
+    Token:
+      type: object
+      required: [access_token, token_type, user_id, email, full_name]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: bearer
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        full_name:
+          type: string
+
+    UserResponse:
+      type: object
+      required: [user_id, email, full_name]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        full_name:
+          type: string
+        created_at:
+          type: string
+          nullable: true
+
+    ChatRequest:
+      type: object
+      required: [user_id, message]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          minLength: 1
+        conversation_id:
+          type: string
+          nullable: true
+
+    RetrievalMetrics:
+      type: object
+      required: [graph_query_ms, vector_search_ms, context_assembly_ms, retrieval_ms, llm_generation_ms]
+      properties:
+        graph_query_ms:
+          type: number
+        vector_search_ms:
+          type: number
+        context_assembly_ms:
+          type: number
+        retrieval_ms:
+          type: number
+        llm_generation_ms:
+          type: number
+
+    MemoryStorageResult:
+      type: object
+      required: [nodes_created, relationships_created, facts_created, chunks_indexed]
+      properties:
+        nodes_created:
+          type: integer
+        relationships_created:
+          type: integer
+        facts_created:
+          type: integer
+        chunks_indexed:
+          type: integer
+
+    MemoryCitation:
+      type: object
+      required: [node_type, retrieval_score, hop_distance, snippet, properties]
+      properties:
+        node_type:
+          type: string
+        retrieval_score:
+          type: number
+        hop_distance:
+          oneOf:
+            - type: integer
+            - type: string
+        snippet:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+        score_breakdown:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    ChatResponse:
+      type: object
+      required: [intent, message]
+      properties:
+        intent:
+          type: string
+          enum: [MEMORY, QUESTION, BOTH]
+        answer:
+          type: string
+          nullable: true
+        memory_storage:
+          allOf:
+            - $ref: '#/components/schemas/MemoryStorageResult'
+          nullable: true
+        retrieval_metrics:
+          allOf:
+            - $ref: '#/components/schemas/RetrievalMetrics'
+          nullable: true
+        memory_citations:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/MemoryCitation'
+        message:
+          type: string
+
+    SessionResponse:
+      type: object
+      required: [id, title, is_archived, message_count]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        created_at:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          nullable: true
+        is_archived:
+          type: boolean
+        message_count:
+          type: integer
+
+    MessageResponse:
+      type: object
+      required: [id, session_id, role, content]
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+        content:
+          type: string
+        intent:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          nullable: true
+        retrieval_time_ms:
+          type: number
+          nullable: true
+        llm_generation_time_ms:
+          type: number
+          nullable: true
+        nodes_retrieved:
+          type: integer
+          nullable: true
+        memory_storage:
+          type: object
+          nullable: true
+          additionalProperties: true
+        memory_citations:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+
+    SessionActionResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string

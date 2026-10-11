@@ -1,0 +1,68 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS Files
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Data
+data/user_samples/*
+!data/user_samples/.gitkeep
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+neo4j/
+*.neo4j
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+/optimized

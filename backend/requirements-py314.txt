@@ -1,0 +1,35 @@
+# Core API
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.34.0,<1.0.0
+python-multipart>=0.0.20
+
+# Config
+python-dotenv>=1.0.1
+
+# LLM / Graph
+google-generativeai>=0.8.5
+neo4j>=5.26.0,<6.0.0
+
+# Database
+psycopg2-binary>=2.9.10
+
+# Auth / Security
+bcrypt>=4.2.0
+python-jose[cryptography]>=3.3.0
+email-validator>=2.2.0
+
+# Document extraction
+PyPDF2>=3.0.1
+python-docx>=1.1.2
+pillow>=11.0.0
+pdf2image>=1.17.0
+
+# Storage
+boto3>=1.35.0
+
+# Vector Database
+pymilvus>=2.4.0,<3.0.0
+
+# Validation
+pydantic>=2.10.0,<3.0.0
+pydantic-settings>=2.6.0,<3.0.0

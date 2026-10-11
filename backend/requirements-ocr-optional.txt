@@ -1,0 +1,5 @@
+# Optional OCR extras.
+# PaddleOCR currently has limited/no wheel support on Python 3.14.
+# Install this file only on a supported Python version.
+
+paddleocr>=2.8.1; python_version < "3.13"
