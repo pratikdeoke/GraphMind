@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import health, chat, auth, memory, documents, sidebar
+from api.routes import health, chat, auth, memory, documents, sidebar, encryption
 from config.settings import settings
 from services.graph.memory_decay import MemoryDecayService
 from services.graph.community_refresh import CommunityRefreshService
@@ -22,6 +22,15 @@ openapi_tags = [
     {
         "name": "memory",
         "description": "Knowledge graph visualization and memory graph endpoints."
+    },
+    {
+        "name": "encryption",
+        "description": (
+            "End-to-end encryption (E2EE) of the memory graph. The user's PIN is "
+            "derived into an AES-256 key via PBKDF2 (client + server parity); only "
+            "a random salt is stored server-side and the key lives in the browser "
+            "sessionStorage, sent per-request via the X-Encryption-Key header."
+        ),
     }
 ]
 
@@ -57,7 +66,7 @@ app.add_middleware(
 async def startup_event():
     """Validate configuration on startup."""
     settings.validate()
-    print(f"🚀 {settings.API_TITLE} v{settings.API_VERSION} starting...")
+    print(f"{settings.API_TITLE} v{settings.API_VERSION} starting...")
     index_count = schema_bootstrap_service.ensure_indexes()
     if index_count > 0:
         print(f"[SchemaBootstrap] Index statements processed: {index_count}")
@@ -79,6 +88,7 @@ app.include_router(memory.router, prefix="/memory", tags=["memory"])
 app.include_router(documents.router, tags=["documents"])
 app.include_router(chat.router, tags=["chat"])
 app.include_router(sidebar.router, tags=["sidebar"])
+app.include_router(encryption.router, prefix="/encryption", tags=["encryption"])
 
 
 @app.get("/")

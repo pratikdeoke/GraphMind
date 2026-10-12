@@ -21,6 +21,7 @@ from neo4j.time import DateTime
 from config.settings import Settings
 from services.graph.query_understanding import QueryUnderstanding, RetrievalMode
 from services.graph.graph_analytics import GraphAnalytics
+from services.encryption.crypto_service import decrypt_node_properties
 
 
 class GraphRetrieval:
@@ -71,6 +72,7 @@ class GraphRetrieval:
         query: str,
         max_depth: int = 2,  # Reduced from 3 for sub-100ms target
         top_k: int = 10,
+        encryption_key: Optional[bytes] = None,
     ) -> Tuple[List[Dict[str, Any]], float]:
         """
         Retrieve relevant graph context using controlled mode-based queries.
@@ -122,6 +124,18 @@ class GraphRetrieval:
                     nodes_with_hops, query
                 )
                 retrieved_nodes = retrieved_nodes[:top_k]
+                # 6. Decrypt sensitive fields for E2EE. Done last so ranking runs
+                # on raw data and every downstream consumer (citation formatting,
+                # LLM answer generation) receives plaintext.
+                if encryption_key:
+                    for node in retrieved_nodes:
+                        props = node.get("properties")
+                        if isinstance(props, dict):
+                            node["properties"] = decrypt_node_properties(
+                                props, encryption_key
+                            )
+
+
 
         except Exception as e:
             print(f"Error during graph retrieval: {e}")

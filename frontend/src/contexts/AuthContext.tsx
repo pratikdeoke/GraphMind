@@ -96,6 +96,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // Clear the in-memory E2EE key so it never outlives the session.
+    try {
+      sessionStorage.removeItem('graphmind_encryption_key');
+    } catch {
+      /* ignore */
+    }
     setToken(null);
     setUser(null);
   };

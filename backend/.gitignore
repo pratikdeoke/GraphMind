@@ -83,3 +83,4 @@ neo4j/
 # User data
 data/user_samples/*
 !data/user_samples/.gitkeep
+nul

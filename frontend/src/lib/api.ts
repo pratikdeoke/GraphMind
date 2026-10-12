@@ -16,6 +16,17 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Attach the E2EE key (if the user has unlocked encryption this session) so
+  // the backend can decrypt/encrypt graph fields. The key lives only in
+  // sessionStorage and is cleared when the tab closes.
+  try {
+    const encKey = sessionStorage.getItem("graphmind_encryption_key");
+    if (encKey) {
+      config.headers["X-Encryption-Key"] = encKey;
+    }
+  } catch {
+    /* sessionStorage unavailable (e.g. SSR); skip */
+  }
   return config;
 });
 
@@ -170,6 +181,51 @@ export const documentAPI = {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return response.data;
+  },
+};
+
+// Encryption API (End-to-End Encryption of the memory graph)
+export interface EncryptionStatus {
+  encryption_enabled: boolean;
+  hint: string | null;
+}
+
+export const encryptionAPI = {
+  /** Enable E2EE. The backend stores only the salt; the client derives the key. */
+  setup: async (pin: string, hint?: string) => {
+    const response = await api.post("/encryption/setup", { pin, hint });
+    return response.data as {
+      salt: string;
+      success: boolean;
+      nodes_encrypted: number;
+    };
+  },
+
+  /** Verify the PIN and get the salt so the client can derive the key locally. */
+  verifyPin: async (pin: string) => {
+    const response = await api.post("/encryption/verify-pin", { pin });
+    return response.data as { salt: string; valid: boolean };
+  },
+
+  /** Change the PIN (re-encrypts all nodes server-side with the new key). */
+  changePin: async (oldPin: string, newPin: string) => {
+    const response = await api.post("/encryption/change-pin", {
+      old_pin: oldPin,
+      new_pin: newPin,
+    });
+    return response.data as { success: boolean; nodes_reencrypted: number };
+  },
+
+  /** Disable E2EE (decrypts all nodes back to plaintext). Requires the PIN. */
+  disable: async (pin: string) => {
+    const response = await api.delete("/encryption/disable", { data: { pin } });
+    return response.data as { success: boolean; nodes_decrypted: number };
+  },
+
+  /** Get whether encryption is enabled and the optional PIN hint. */
+  status: async () => {
+    const response = await api.get("/encryption/status");
+    return response.data as EncryptionStatus;
   },
 };
 

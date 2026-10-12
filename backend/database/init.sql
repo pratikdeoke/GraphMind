@@ -21,6 +21,15 @@ CREATE TABLE users (
     -- Neo4j mapping
     neo4j_user_id VARCHAR(100) UNIQUE,
     
+    -- End-to-End Encryption (E2EE) of the memory graph.
+    -- encryption_salt: random per-user salt (hex) used with PBKDF2 to derive
+    --   the AES-256 key from the user's PIN. The PIN itself is NEVER stored.
+    -- encryption_enabled: whether the user's Neo4j nodes are encrypted at rest.
+    -- encryption_hint: optional user-provided hint to remember their PIN.
+    encryption_salt VARCHAR(64),
+    encryption_enabled BOOLEAN DEFAULT FALSE,
+    encryption_hint VARCHAR(255),
+    
     -- Indexes
     CONSTRAINT users_email_check CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );

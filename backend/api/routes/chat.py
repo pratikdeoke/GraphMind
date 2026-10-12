@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Header, status, Query, Path
 from typing import Optional, List
+import base64
 from api.models import ChatRequest, ChatResponse, IntentType, MemoryStorageResult, RetrievalMetrics, AnswerEvaluation, MemoryCitation
 from services.llm.intent_classifier import IntentClassifier
 from services.orchestrator.memory_orchestrator import MemoryOrchestrator
@@ -19,6 +20,33 @@ retrieval_orchestrator = RetrievalOrchestrator()
 answer_quality_evaluator = AnswerQualityEvaluator()
 chat_service = ChatService()
 user_service = UserService()
+
+
+def _decode_encryption_key(header_value: Optional[str]) -> Optional[bytes]:
+    """Decode the base64 X-Encryption-Key header into raw 32-byte AES key.
+
+    Args:
+        header_value: Base64-encoded raw AES key, or None.
+
+    Returns:
+        The raw key bytes if the header is present and valid, else None.
+
+    SECURITY: The returned key is used only in-memory for the current request.
+    It is never logged, persisted, or cached. A malformed header is ignored
+    (returns None) rather than failing the request, so a stray header cannot
+    break chat for users who are not using encryption.
+    """
+    if not header_value:
+        return None
+    try:
+        key = base64.b64decode(header_value, validate=True)
+    except Exception:
+        # Ignore malformed key; request proceeds without E2EE.
+        return None
+    # AES-256 key must be exactly 32 bytes. Ignore anything else.
+    if len(key) != 32:
+        return None
+    return key
 
 
 async def get_current_user_id(authorization: Optional[str] = Header(None)) -> str:
@@ -79,7 +107,17 @@ async def get_current_user_id(authorization: Optional[str] = Header(None)) -> st
 )
 async def chat_endpoint(
     request: ChatRequest,
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id),
+    x_encryption_key: Optional[str] = Header(
+        default=None,
+        alias="X-Encryption-Key",
+        description=(
+            "Optional base64-encoded AES-256 key derived on the client from the "
+            "user's PIN. Enables end-to-end encryption: sensitive fields are "
+            "decrypted for retrieval and re-encrypted on ingestion. The key is "
+            "used only in-memory for this request and is NEVER logged or stored."
+        ),
+    ),
 ):
     """
     Unified chat endpoint supporting:
@@ -88,6 +126,12 @@ async def chat_endpoint(
     - Both operations (BOTH)
 
     Automatically persists chat messages to PostgreSQL.
+
+    End-to-End Encryption (E2EE):
+    - The client may send its PIN-derived AES key via the X-Encryption-Key
+      header (base64 of the raw 32-byte key).
+    - When present, ingestion encrypts sensitive fields at rest and retrieval
+      decrypts them for this request only. The key is never logged or persisted.
     """
     # Get user's neo4j_user_id for graph operations
     user = user_service.get_user_by_id(user_id)
@@ -95,6 +139,11 @@ async def chat_endpoint(
         raise HTTPException(status_code=404, detail="User not found")
 
     neo4j_user_id = user["neo4j_user_id"]
+
+    # Decode the optional E2EE key from the X-Encryption-Key header.
+    # SECURITY: this raw key lives only for the duration of this request and is
+    # never logged, cached, or written anywhere.
+    encryption_key = _decode_encryption_key(x_encryption_key)
 
     # Get or create active session for user
     session = chat_service.get_or_create_session(user_id)
@@ -131,7 +180,8 @@ async def chat_endpoint(
         # Handle memory ingestion only
         storage_result = memory_orchestrator.ingest_memory(
             user_id=neo4j_user_id,
-            message=request.message
+            message=request.message,
+            encryption_key=encryption_key
         )
 
         assistant_content = "Financial memory stored successfully."
@@ -148,7 +198,8 @@ async def chat_endpoint(
         answer, metrics, memory_citations = retrieval_orchestrator.retrieve_and_answer(
             user_id=neo4j_user_id,
             query=request.message,
-            strategy_override=request.retrieval_mode.value
+            strategy_override=request.retrieval_mode.value,
+            encryption_key=encryption_key
         )
 
         assistant_content = answer
@@ -181,13 +232,15 @@ async def chat_endpoint(
         # Handle both memory ingestion and query
         storage_result = memory_orchestrator.ingest_memory(
             user_id=neo4j_user_id,
-            message=request.message
+            message=request.message,
+            encryption_key=encryption_key
         )
 
         answer, metrics, memory_citations = retrieval_orchestrator.retrieve_and_answer(
             user_id=neo4j_user_id,
             query=request.message,
-            strategy_override=request.retrieval_mode.value
+            strategy_override=request.retrieval_mode.value,
+            encryption_key=encryption_key
         )
 
         assistant_content = answer

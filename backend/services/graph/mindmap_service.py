@@ -2,10 +2,11 @@
 Mindmap Service - Retrieve graph structure for visualization
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from neo4j import GraphDatabase
 from config.settings import Settings
 from services.vector.milvus_service import get_milvus_service
+from services.encryption.crypto_service import decrypt_node_properties
 
 
 class MindmapService:
@@ -27,12 +28,17 @@ class MindmapService:
 
         self.milvus_service = get_milvus_service()
 
-    def get_user_graph(self, user_id: str) -> Tuple[List[Dict], List[Dict]]:
+    def get_user_graph(self, user_id: str, encryption_key: Optional[bytes] = None) -> Tuple[List[Dict], List[Dict]]:
         """
         Get all nodes and relationships for a user, including vector database entries.
 
         Args:
             user_id: User identifier
+            encryption_key: Optional 32-byte AES key. When provided, sensitive
+                node fields are decrypted (AES-256-GCM) before labels and the
+                returned properties are built, so the mindmap shows plaintext for
+                users with E2EE enabled. When None, data is returned as stored
+                (plaintext for non-encrypted users, ciphertext otherwise).
 
         Returns:
             Tuple of (nodes_list, edges_list)
@@ -51,6 +57,7 @@ class MindmapService:
                 WHERE (n.user_id = $user_id OR (n:User AND n.id = $user_id))
                 AND NOT 'RetrievalView' IN labels(n)
                 AND NOT 'RankerFeedback' IN labels(n)
+                AND NOT 'EncryptionCanary' IN labels(n)
                 RETURN 
                     elementId(n) as node_id,
                     labels(n) as labels,
@@ -65,6 +72,11 @@ class MindmapService:
                     neo4j_id = record["node_id"]
                     labels = record["labels"]
                     properties = dict(record["properties"])
+
+                    # Decrypt sensitive fields for E2EE before building the label
+                    # and returning properties (so the mindmap shows plaintext).
+                    if encryption_key:
+                        properties = decrypt_node_properties(properties, encryption_key)
 
                     # Get node type (first label)
                     node_type = labels[0] if labels else "Unknown"
@@ -108,8 +120,10 @@ class MindmapService:
                 AND (b.user_id = $user_id OR (b:User AND b.id = $user_id)))
                 AND NOT 'RetrievalView' IN labels(a)
                 AND NOT 'RankerFeedback' IN labels(a)
+                AND NOT 'EncryptionCanary' IN labels(a)
                 AND NOT 'RetrievalView' IN labels(b)
                 AND NOT 'RankerFeedback' IN labels(b)
+                AND NOT 'EncryptionCanary' IN labels(b)
                 RETURN 
                     elementId(r) as rel_id,
                     elementId(a) as source_id,
@@ -205,7 +219,8 @@ class MindmapService:
                 # Delete all relationships and nodes for user
                 delete_query = """
                 MATCH (n)
-                WHERE n.user_id = $user_id OR (n:User AND n.id = $user_id)
+                WHERE (n.user_id = $user_id OR (n:User AND n.id = $user_id))
+                AND NOT 'EncryptionCanary' IN labels(n)
                 DETACH DELETE n
                 RETURN count(n) as deleted_nodes
                 """

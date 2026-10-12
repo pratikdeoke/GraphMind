@@ -20,6 +20,9 @@ asyncpg==0.29.0
 bcrypt==4.1.2
 python-jose[cryptography]==3.3.0
 email-validator==2.1.0
+# End-to-End Encryption (AES-256-GCM + PBKDF2) for the memory graph.
+# (Also pulled in transitively by python-jose[cryptography]; pinned explicitly.)
+cryptography>=42.0.0
 
 # Document Processing
 PyPDF2==3.0.1

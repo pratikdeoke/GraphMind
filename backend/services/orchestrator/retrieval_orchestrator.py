@@ -55,6 +55,7 @@ class RetrievalOrchestrator:
         user_id: str,
         query: str,
         strategy_override: Optional[str] = None,
+        encryption_key: Optional[bytes] = None,
     ) -> Tuple[str, Dict[str, float], List[Dict[str, Any]]]:
         """
         Execute complete retrieval and answer generation workflow.
@@ -97,14 +98,14 @@ class RetrievalOrchestrator:
             # Step 2: Parallel retrieval using asyncio (graph + vector simultaneously)
             try:
                 graph_context, vector_context, graph_query_ms, vector_search_ms = (
-                    self._run_async_retrieval(user_id, query, retrieval_plan)
+                    self._run_async_retrieval(user_id, query, retrieval_plan, encryption_key)
                 )
             except Exception as e:
                 # Fallback to sequential retrieval if async fails
                 print(
                     f"Async retrieval failed, falling back to sequential: {e}")
                 graph_context, graph_query_ms = self._retrieve_graph_parallel(
-                    user_id, query, retrieval_plan)
+                    user_id, query, retrieval_plan, encryption_key)
                 vector_context, vector_search_ms = self._retrieve_vector_parallel(
                     user_id, query, retrieval_plan)
 
@@ -232,7 +233,8 @@ class RetrievalOrchestrator:
         self,
         user_id: str,
         query: str,
-        retrieval_plan: RetrievalPlan
+        retrieval_plan: RetrievalPlan,
+        encryption_key: Optional[bytes] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float, float]:
         """
         Run graph and vector retrieval in parallel using asyncio.
@@ -247,6 +249,7 @@ class RetrievalOrchestrator:
             user_id,
             query,
             retrieval_plan,
+            encryption_key,
         )
         vector_future = self.executor.submit(
             self._retrieve_vector_sync,
@@ -344,7 +347,8 @@ class RetrievalOrchestrator:
         self,
         user_id: str,
         query: str,
-        retrieval_plan: RetrievalPlan
+        retrieval_plan: RetrievalPlan,
+        encryption_key: Optional[bytes] = None,
     ) -> Tuple[List[Dict[str, Any]], float]:
         """
         Synchronous graph retrieval (executed in thread executor).
@@ -358,6 +362,7 @@ class RetrievalOrchestrator:
                 query=query,
                 max_depth=retrieval_plan.graph_depth,
                 top_k=retrieval_plan.graph_top_k,
+                encryption_key=encryption_key,
             )
             elapsed = (time.time() - start) * 1000
             graph_context = graph_context[: retrieval_plan.graph_top_k]
@@ -403,9 +408,9 @@ class RetrievalOrchestrator:
             print(f"Vector retrieval error: {e}")
             return [], (time.time() - start) * 1000
 
-    def _retrieve_graph_parallel(self, user_id: str, query: str, retrieval_plan: RetrievalPlan) -> Tuple[List[Dict[str, Any]], float]:
+    def _retrieve_graph_parallel(self, user_id: str, query: str, retrieval_plan: RetrievalPlan, encryption_key: Optional[bytes] = None) -> Tuple[List[Dict[str, Any]], float]:
         """Fallback: Retrieve from graph database sequentially with optimized depth."""
-        return self._retrieve_graph_sync(user_id, query, retrieval_plan)
+        return self._retrieve_graph_sync(user_id, query, retrieval_plan, encryption_key)
 
     def _retrieve_vector_parallel(self, user_id: str, query: str, retrieval_plan: RetrievalPlan) -> Tuple[List[Dict[str, Any]], float]:
         """Fallback: Retrieve from vector database (Milvus) with fallback to Neo4j sequentially."""

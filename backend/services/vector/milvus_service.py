@@ -7,7 +7,12 @@ from datetime import datetime
 import uuid
 import json
 
-from pymilvus import Collection, connections, utility, FieldSchema, CollectionSchema, DataType
+try:
+    from pymilvus import Collection, connections, utility, FieldSchema, CollectionSchema, DataType
+    _PYMILVUS_AVAILABLE = True
+except ImportError:  # pymilvus is optional; VectorRetrieval (Neo4j-backed) is the active path
+    Collection = connections = utility = FieldSchema = CollectionSchema = DataType = None  # type: ignore
+    _PYMILVUS_AVAILABLE = False
 from config.settings import Settings
 from services.vector.embeddings import EmbeddingService
 
@@ -20,7 +25,11 @@ class MilvusService:
         self.embedding_service = EmbeddingService()
         self.collection_name = Settings.MILVUS_COLLECTION
         self.embedding_dim = Settings.EMBEDDING_DIMENSION
-        self.collection: Optional[Collection] = None
+        self.collection = None
+
+        if not _PYMILVUS_AVAILABLE:
+            print("Warning: pymilvus not installed; Milvus vector store disabled (Neo4j-backed retrieval still active).")
+            return
 
         try:
             # Connect to Milvus

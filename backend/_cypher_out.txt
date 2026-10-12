@@ -1,0 +1,4 @@
+NODES_WITH_TEXT: 2
+PLAINTEXT  | I invested 50,000 rupees in TCS
+PLAINTEXT  | I invested 50,000 rupees in TCS
+CANARY_NODES: 0

@@ -7,7 +7,7 @@ Flow:
 3. Ingest into vector database (Milvus)
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from services.extraction.llm_extractor import LLMExtractor
 from services.graph.ingestion import GraphIngestion
 from services.graph.entity_finalizer import EntityFinalizer
@@ -29,7 +29,7 @@ class MemoryOrchestrator:
         self.vector_retrieval = VectorRetrieval()
         self.milvus_service = get_milvus_service()
 
-    def ingest_memory(self, user_id: str, message: str, source_type: str = "chat") -> Dict[str, Any]:
+    def ingest_memory(self, user_id: str, message: str, source_type: str = "chat", encryption_key: Optional[bytes] = None) -> Dict[str, Any]:
         """
         Execute complete memory ingestion workflow.
 
@@ -37,6 +37,8 @@ class MemoryOrchestrator:
             user_id: User identifier
             message: User's message containing information to store
             source_type: Source type for the message ('chat' or 'document')
+            encryption_key: Optional 32-byte AES key. When provided, sensitive
+                graph fields are encrypted at rest (E2EE).
 
         Returns:
             Dictionary with ingestion results
@@ -58,7 +60,8 @@ class MemoryOrchestrator:
             nodes=nodes,
             relationships=relationships,
             skip_contradiction_detection=skip_contradiction,
-            source_type=source_type
+            source_type=source_type,
+            encryption_key=encryption_key
         )
 
         # Step 2.5: Finalize graph features for retrieval quality (degree, canonical names).

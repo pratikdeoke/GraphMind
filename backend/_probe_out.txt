@@ -1,0 +1,9 @@
+=== PostgreSQL probe (localhost:5432 / db=graphmind) ===
+PG FAIL user=graphmind_user pw=graphmind_pass_2026: connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "graphmind_user"
+PG FAIL user=graphmind_user pw=graphmind_pass: connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "graphmind_user"
+PG FAIL user=postgres pw=postgres: connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+PG FAIL user=postgres pw=password: connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+PG FAIL user=postgres pw=admin: connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+PG FAIL user=postgres pw=root: connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+=== Neo4j probe (bolt://localhost:7687) ===
+NEO4J OK: user=neo4j pw=graphmind123

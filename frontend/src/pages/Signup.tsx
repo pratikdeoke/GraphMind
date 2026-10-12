@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import EncryptionSetup from '../components/EncryptionSetup';
 
 function Blobs() {
   return (
@@ -89,6 +90,7 @@ export default function Signup() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
+  const [showEncryptionSetup, setShowEncryptionSetup] = useState(false);
   const { signup, isLoading } = useAuth();
   const navigate = useNavigate();
 
@@ -99,7 +101,9 @@ export default function Signup() {
     if (password.length < 6) { setError('Password must be at least 6 characters'); return; }
     try {
       await signup(email, password, fullName);
-      navigate('/chat');
+      // After a successful signup, prompt the user to set up E2EE before
+      // entering the app (they can skip and enable it later).
+      setShowEncryptionSetup(true);
     } catch (err: any) {
       setError(err.message || 'Failed to create account');
     }
@@ -230,6 +234,15 @@ export default function Signup() {
           </p>
         </div>
       </div>
+      {showEncryptionSetup && (
+        <EncryptionSetup
+          mode="setup"
+          isFirstTime={true}
+          onComplete={() => navigate('/chat')}
+          onSkip={() => navigate('/chat')}
+        />
+      )}
+
     </div>
   );
 }

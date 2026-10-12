@@ -4,6 +4,7 @@ Memory/Mindmap Routes - Visualization endpoints
 
 from fastapi import APIRouter, HTTPException, status, Header
 from typing import Optional, List
+import base64
 from pydantic import BaseModel
 from api.models_mindmap import MindmapResponse, MindmapNode, MindmapEdge
 from services.graph.mindmap_service import mindmap_service
@@ -93,6 +94,25 @@ def get_user_from_token(authorization: Optional[str] = Header(None)) -> str:
 
     return payload["user_id"]
 
+def _decode_encryption_key(header_value: Optional[str]) -> Optional[bytes]:
+    """Decode the base64 X-Encryption-Key header into a raw 32-byte AES key.
+
+    Returns None if the header is absent or malformed so the request proceeds
+    without E2EE. The key is used only in-memory for this request and is never
+    logged or stored.
+    """
+    if not header_value:
+        return None
+    try:
+        key = base64.b64decode(header_value, validate=True)
+    except Exception:
+        return None
+    if len(key) != 32:
+        return None
+    return key
+
+
+
 
 @router.get(
     "/mindmap",
@@ -110,6 +130,15 @@ async def get_mindmap(
     authorization: Optional[str] = Header(
         default=None,
         description="Bearer token. Format: 'Bearer <access_token>'"
+    ),
+    x_encryption_key: Optional[str] = Header(
+        default=None,
+        alias="X-Encryption-Key",
+        description=(
+            "Optional base64-encoded AES-256 key (from the client session). When "
+            "provided, encrypted node fields are decrypted for this response so "
+            "the mindmap renders plaintext. The key is never logged or stored."
+        ),
     )
 ):
     """
@@ -127,6 +156,9 @@ async def get_mindmap(
     # Get PostgreSQL user_id from JWT token
     pg_user_id = get_user_from_token(authorization)
 
+    # Decode the optional E2EE key (raw 32-byte AES key) for this request only.
+    encryption_key = _decode_encryption_key(x_encryption_key)
+
     # Get user's neo4j_user_id from PostgreSQL (for backward compatibility)
     user = user_service.get_user_by_id(pg_user_id)
     if not user:
@@ -141,11 +173,11 @@ async def get_mindmap(
     # Get graph data using whichever user_id has data
     # First try neo4j_user_id, then fall back to pg_user_id
     nodes_data, edges_data = mindmap_service.get_user_graph(
-        neo4j_user_id) if neo4j_user_id else ([], [])
+        neo4j_user_id, encryption_key=encryption_key) if neo4j_user_id else ([], [])
 
     if not nodes_data and not edges_data:
         # Fall back to pg_user_id for backward compatibility
-        nodes_data, edges_data = mindmap_service.get_user_graph(pg_user_id)
+        nodes_data, edges_data = mindmap_service.get_user_graph(pg_user_id, encryption_key=encryption_key)
 
     # Convert to Pydantic models
     nodes = [MindmapNode(**node) for node in nodes_data]

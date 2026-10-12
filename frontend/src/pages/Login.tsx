@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { encryptionAPI } from '../lib/api';
+import EncryptionSetup from '../components/EncryptionSetup';
 
 function Blobs() {
   return (
@@ -59,6 +61,8 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
+  const [showUnlock, setShowUnlock] = useState(false);
+  const [encryptionHint, setEncryptionHint] = useState<string | null>(null);
   const { login, isLoading } = useAuth();
   const navigate = useNavigate();
 
@@ -67,6 +71,17 @@ export default function Login() {
     setError('');
     try {
       await login(email, password);
+      // If this user has E2EE enabled, prompt them to unlock before entering.
+      try {
+        const status = await encryptionAPI.status();
+        if (status.encryption_enabled) {
+          setEncryptionHint(status.hint ?? null);
+          setShowUnlock(true);
+          return;
+        }
+      } catch {
+        // If status check fails, proceed without prompting (best-effort).
+      }
       navigate('/chat');
     } catch (err: any) {
       setError(err.message || 'Invalid credentials. Please try again.');
@@ -216,6 +231,14 @@ export default function Login() {
           </p>
         </div>
       </div>
+      {showUnlock && (
+        <EncryptionSetup
+          mode="unlock"
+          hint={encryptionHint}
+          onComplete={() => navigate('/chat')}
+        />
+      )}
+
     </div>
   );
 }

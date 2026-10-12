@@ -13,6 +13,10 @@ from datetime import datetime
 import uuid
 from neo4j import GraphDatabase
 from config.settings import Settings
+from services.encryption.crypto_service import (
+    encrypt_field,
+    encrypt_node_properties,
+)
 
 
 class GraphIngestion:
@@ -41,7 +45,8 @@ class GraphIngestion:
         nodes: List[Dict[str, Any]], 
         relationships: List[Dict[str, Any]],
         skip_contradiction_detection: bool = False,
-        source_type: str = "chat"
+        source_type: str = "chat",
+        encryption_key: Optional[bytes] = None
     ) -> Dict[str, int]:
         """
         Ingest message, facts, nodes and relationships into the graph.
@@ -54,7 +59,10 @@ class GraphIngestion:
             relationships: List of relationship dictionaries
             skip_contradiction_detection: Whether to skip contradiction detection
             source_type: Source type for the message node ('chat' or 'document')
-            
+            encryption_key: Optional 32-byte AES key. When provided, sensitive
+                fields (see crypto_service.FIELDS_TO_ENCRYPT) are encrypted with
+                AES-256-GCM before being written to Neo4j (E2EE at rest).
+                
         Returns:
             Dictionary with counts of nodes and relationships created
         """
@@ -72,13 +80,19 @@ class GraphIngestion:
                 # 1. Ensure User node exists
                 self._ensure_user_node(session, user_id)
                 
-                # 2. Create Message node
-                message_id = self._create_message_node(session, user_id, message_text, source_type=source_type)
+                # 2. Create Message node (encrypt its text when E2EE is on)
+                message_id = self._create_message_node(
+                    session, user_id, message_text,
+                    source_type=source_type, encryption_key=encryption_key
+                )
                 
                 # 3. Create Fact nodes
                 fact_ids = []  # list of (fact_id, fact_text)
                 for fact in facts:
-                    fact_id = self._create_fact_node(session, user_id, fact, message_id)
+                    fact_id = self._create_fact_node(
+                        session, user_id, fact, message_id,
+                        encryption_key=encryption_key
+                    )
                     if fact_id:
                         fact_ids.append((fact_id, fact.get("text", "")))
                         facts_created += 1
@@ -86,7 +100,7 @@ class GraphIngestion:
                 # 4. Create/merge entity nodes
                 node_map = {}  # Track created nodes: {type: [id1, id2, ...]}
                 for node in nodes:
-                    self._merge_node(session, user_id, node)
+                    self._merge_node(session, user_id, node, encryption_key=encryption_key)
                     nodes_created += 1
                     node_type = node.get("type")
                     node_id = node.get("properties", {}).get("id")
@@ -172,9 +186,14 @@ class GraphIngestion:
         """
         session.run(query, user_id=user_id)
     
-    def _create_message_node(self, session, user_id: str, text: str, source_type: str = "chat") -> str:
-        """Create a Message node and link to User."""
+    def _create_message_node(self, session, user_id: str, text: str, source_type: str = "chat", encryption_key: Optional[bytes] = None) -> str:
+        """Create a Message node and link to User.
+
+        When an encryption_key is supplied, the message text is encrypted with
+        AES-256-GCM before being written (E2EE at rest).
+        """
         message_id = f"msg_{uuid.uuid4().hex[:12]}"
+        stored_text = encrypt_field(text, encryption_key) if encryption_key else text
         query = """
         MATCH (u:User {id: $user_id})
         CREATE (m:Message {
@@ -188,26 +207,42 @@ class GraphIngestion:
         CREATE (u)-[:OWNS_MESSAGE]->(m)
         RETURN m.id as id
         """
-        result = session.run(query, user_id=user_id, message_id=message_id, text=text, source_type=source_type)
+        result = session.run(query, user_id=user_id, message_id=message_id, text=stored_text, source_type=source_type)
         record = result.single()
         return record["id"] if record else message_id
     
-    def _create_fact_node(self, session, user_id: str, fact: Dict[str, Any], message_id: str) -> Optional[str]:
-        """Create a Fact node with deduplication - reinforce if exists."""
+    def _create_fact_node(self, session, user_id: str, fact: Dict[str, Any], message_id: str, encryption_key: Optional[bytes] = None) -> Optional[str]:
+        """Create a Fact node with deduplication - reinforce if exists.
+
+        When an encryption_key is supplied, the fact text is encrypted with
+        AES-256-GCM before storage (E2EE at rest).
+
+        NOTE (E2EE trade-off): AES-256-GCM uses a random nonce, so identical
+        plaintext produces different ciphertext. Exact-text deduplication and
+        the contradiction heuristic therefore cannot match against already
+        encrypted facts; under encryption each incoming fact is stored as a new
+        node. This is an inherent and accepted limitation of encrypting data at
+        rest while keeping the key client-side.
+        """
         fact_text = fact.get("text", "")
         confidence = fact.get("confidence", 0.8)
         
         if not fact_text:
             return None
+
+        # Value actually persisted (ciphertext when E2EE is enabled).
+        stored_fact_text = encrypt_field(fact_text, encryption_key) if encryption_key else fact_text
         
-        # Check if fact already exists (deduplication)
+        # Check if fact already exists (deduplication).
+        # Under encryption this compares ciphertext and will not match existing
+        # nodes (non-deterministic GCM), so new facts are created instead.
         check_query = """
         MATCH (f:Fact {user_id: $user_id})
         WHERE f.text = $fact_text
         RETURN f.id as id
         """
         
-        result = session.run(check_query, user_id=user_id, fact_text=fact_text)
+        result = session.run(check_query, user_id=user_id, fact_text=stored_fact_text)
         existing = result.single()
         
         if existing:
@@ -248,7 +283,7 @@ class GraphIngestion:
             user_id=user_id,
             message_id=message_id,
             fact_id=fact_id,
-            fact_text=fact_text,
+            fact_text=stored_fact_text,
             confidence=confidence
         )
         record = result.single()
@@ -318,12 +353,18 @@ class GraphIngestion:
         except Exception as e:
             print(f"Warning: Could not link transaction to asset: {e}")
     
-    def _merge_node(self, session, user_id: str, node: Dict[str, Any]):
+    def _merge_node(self, session, user_id: str, node: Dict[str, Any], encryption_key: Optional[bytes] = None):
         """
         Merge a single node into the graph.
         
         Uses MERGE to avoid duplicates.
         Adds user_id, metadata, and reinforcement fields automatically.
+
+        When an encryption_key is supplied, sensitive fields listed in
+        crypto_service.FIELDS_TO_ENCRYPT (amount, value, price, notes,
+        description, ...) are encrypted with AES-256-GCM before storage.
+        Structural fields (id, user_id, name, entity_type, timestamps) are left
+        in plaintext so graph traversal and MERGE keys keep working.
         """
         node_type = node.get("type", "Entity")
         properties = node.get("properties", {})
@@ -338,6 +379,10 @@ class GraphIngestion:
         # Add metadata fields if not present
         if "source_type" not in properties:
             properties["source_type"] = "user_input"
+
+        # Encrypt sensitive fields for E2EE (id/user_id/name are untouched).
+        if encryption_key:
+            properties = encrypt_node_properties(properties, encryption_key)
         
         # Create Cypher query with labels and metadata
         # Note: Only Message has OWNS_MESSAGE edge from User

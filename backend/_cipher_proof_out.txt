@@ -1,0 +1,8 @@
+SETUP_OK nodes_encrypted=0
+CHAT_STORED
+[OK] PostgreSQL connection pool initialized
+NODES_FOR_USER: 1
+CIPHERTEXT labels= ['EncryptionCanary'] keys= ['kind', 'user_id', 'text']
+CIPHERTEXT_FIELDS: 1 PLAINTEXT_FIELDS: 0
+CANARY_NODES: 1
+DISABLED_CLEANUP_OK
