@@ -8,6 +8,7 @@ Flow:
 """
 
 from typing import Dict, Any, Optional
+from typing import Dict, Any
 from services.extraction.llm_extractor import LLMExtractor
 from services.graph.ingestion import GraphIngestion
 from services.graph.entity_finalizer import EntityFinalizer
@@ -30,6 +31,7 @@ class MemoryOrchestrator:
         self.milvus_service = get_milvus_service()
 
     def ingest_memory(self, user_id: str, message: str, source_type: str = "chat", encryption_key: Optional[bytes] = None) -> Dict[str, Any]:
+    def ingest_memory(self, user_id: str, message: str, source_type: str = "chat") -> Dict[str, Any]:
         """
         Execute complete memory ingestion workflow.
 
@@ -62,6 +64,7 @@ class MemoryOrchestrator:
             skip_contradiction_detection=skip_contradiction,
             source_type=source_type,
             encryption_key=encryption_key
+            source_type=source_type
         )
 
         # Step 2.5: Finalize graph features for retrieval quality (degree, canonical names).

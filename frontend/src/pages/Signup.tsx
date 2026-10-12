@@ -104,6 +104,7 @@ export default function Signup() {
       // After a successful signup, prompt the user to set up E2EE before
       // entering the app (they can skip and enable it later).
       setShowEncryptionSetup(true);
+      navigate('/chat');
     } catch (err: any) {
       setError(err.message || 'Failed to create account');
     }

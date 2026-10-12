@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import health, chat, auth, memory, documents, sidebar, encryption
+from api.routes import health, chat, auth, memory, documents, sidebar, encryption, export
 from config.settings import settings
 from services.graph.memory_decay import MemoryDecayService
 from services.graph.community_refresh import CommunityRefreshService
@@ -31,6 +31,8 @@ openapi_tags = [
             "a random salt is stored server-side and the key lives in the browser "
             "sessionStorage, sent per-request via the X-Encryption-Key header."
         ),
+        "name": "export",
+        "description": "Export chat responses and full memory as PDF or Excel."
     }
 ]
 
@@ -67,6 +69,7 @@ async def startup_event():
     """Validate configuration on startup."""
     settings.validate()
     print(f"{settings.API_TITLE} v{settings.API_VERSION} starting...")
+    print(f"{settings.API_TITLE} v{settings.API_VERSION} starting...", flush=True)
     index_count = schema_bootstrap_service.ensure_indexes()
     if index_count > 0:
         print(f"[SchemaBootstrap] Index statements processed: {index_count}")
@@ -89,6 +92,7 @@ app.include_router(documents.router, tags=["documents"])
 app.include_router(chat.router, tags=["chat"])
 app.include_router(sidebar.router, tags=["sidebar"])
 app.include_router(encryption.router, prefix="/encryption", tags=["encryption"])
+app.include_router(export.router, prefix="/export", tags=["export"])
 
 
 @app.get("/")

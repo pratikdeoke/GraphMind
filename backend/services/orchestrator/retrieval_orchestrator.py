@@ -16,6 +16,16 @@ from services.vector.milvus_service import get_milvus_service
 from services.cache.retrieval_cache import get_retrieval_cache
 
 
+def _citation_entity_name(citation: Dict[str, Any]) -> Optional[str]:
+    """Return the entity name a citation represents, or None."""
+    props = citation.get("properties") or {}
+    name = props.get("name")
+    if name:
+        return str(name).strip().lower()
+    snippet = (citation.get("snippet") or "").strip().lower()
+    return snippet or None
+
+
 class RetrievalOrchestrator:
     """
     Orchestrates complete query retrieval and answer generation workflow.
@@ -99,6 +109,7 @@ class RetrievalOrchestrator:
             try:
                 graph_context, vector_context, graph_query_ms, vector_search_ms = (
                     self._run_async_retrieval(user_id, query, retrieval_plan, encryption_key)
+                    self._run_async_retrieval(user_id, query, retrieval_plan)
                 )
             except Exception as e:
                 # Fallback to sequential retrieval if async fails
@@ -106,6 +117,7 @@ class RetrievalOrchestrator:
                     f"Async retrieval failed, falling back to sequential: {e}")
                 graph_context, graph_query_ms = self._retrieve_graph_parallel(
                     user_id, query, retrieval_plan, encryption_key)
+                    user_id, query, retrieval_plan)
                 vector_context, vector_search_ms = self._retrieve_vector_parallel(
                     user_id, query, retrieval_plan)
 
@@ -235,6 +247,7 @@ class RetrievalOrchestrator:
         query: str,
         retrieval_plan: RetrievalPlan,
         encryption_key: Optional[bytes] = None,
+        retrieval_plan: RetrievalPlan
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float, float]:
         """
         Run graph and vector retrieval in parallel using asyncio.
@@ -349,6 +362,7 @@ class RetrievalOrchestrator:
         query: str,
         retrieval_plan: RetrievalPlan,
         encryption_key: Optional[bytes] = None,
+        retrieval_plan: RetrievalPlan
     ) -> Tuple[List[Dict[str, Any]], float]:
         """
         Synchronous graph retrieval (executed in thread executor).
@@ -411,6 +425,9 @@ class RetrievalOrchestrator:
     def _retrieve_graph_parallel(self, user_id: str, query: str, retrieval_plan: RetrievalPlan, encryption_key: Optional[bytes] = None) -> Tuple[List[Dict[str, Any]], float]:
         """Fallback: Retrieve from graph database sequentially with optimized depth."""
         return self._retrieve_graph_sync(user_id, query, retrieval_plan, encryption_key)
+    def _retrieve_graph_parallel(self, user_id: str, query: str, retrieval_plan: RetrievalPlan) -> Tuple[List[Dict[str, Any]], float]:
+        """Fallback: Retrieve from graph database sequentially with optimized depth."""
+        return self._retrieve_graph_sync(user_id, query, retrieval_plan)
 
     def _retrieve_vector_parallel(self, user_id: str, query: str, retrieval_plan: RetrievalPlan) -> Tuple[List[Dict[str, Any]], float]:
         """Fallback: Retrieve from vector database (Milvus) with fallback to Neo4j sequentially."""
@@ -975,11 +992,25 @@ class RetrievalOrchestrator:
                         "amount": props.get("amount", 0),
                         "transaction_type": props.get("transaction_type", ""),
                         "confidence": props.get("confidence", 0.0)
+                        key: value for key, value in props.items()
+                        if key in [
+                            "amount", "transaction_type", "confidence",
+                            "date", "transaction_date", "asset", "asset_name",
+                            "notes", "description", "id",
+                        ]
                     }
                 elif node_type in ["Asset", "Goal", "Entity"]:
                     citation["properties"] = {
                         key: value for key, value in props.items()
                         if key in ["name", "text", "confidence", "id"]
+                        if key in [
+                            "name", "text", "confidence", "id",
+                            # Export-relevant fields (see services/export).
+                            "asset_type", "amount_invested", "current_value",
+                            "shares", "buy_price", "monthly_sip", "units",
+                            "nav", "returns", "target_amount", "deadline",
+                            "progress",
+                        ]
                     }
 
                 citations.append(citation)
@@ -1116,6 +1147,11 @@ class RetrievalOrchestrator:
 
         # Second pass: keep Facts only if they don't restate an already-represented
         # entity. A Fact restates an entity when its text contains that entity name.
+        #
+        # If a Fact restates an entity we already have at node level (e.g. an
+        # Asset/Transaction), we fold the Fact's text into the surviving citation
+        # so consumers that never see the dropped Fact (e.g. export) can still
+        # recover the numbers the entity node doesn't store itself.
         for citation in citations:
             node_type = (citation.get("node_type") or "").lower()
             if node_type in ENTITY_TYPES:
@@ -1128,6 +1164,25 @@ class RetrievalOrchestrator:
             haystack = f"{snippet} {prop_text}"
             # Skip this Fact if it mentions an entity we already have a node for.
             if any(name and name in haystack for name in represented_entities):
+            # Find the entity this Fact restates (first represented entity name
+            # appearing in the Fact text/snippet).
+            restated_entity = None
+            for name in represented_entities:
+                if name and name in haystack:
+                    restated_entity = name
+                    break
+            if restated_entity is not None:
+                # Match the surviving citation that represents the same entity.
+                for kept_cit in kept:
+                    if _citation_entity_name(kept_cit) == restated_entity:
+                        fact_props = citation.get("properties") or {}
+                        fact_text = fact_props.get("text") or citation.get("snippet") or ""
+                        kept_props = kept_cit.setdefault("properties", {})
+                        existing = kept_props.get("fact_text")
+                        kept_props["fact_text"] = (
+                            f"{existing} | {fact_text}" if existing else fact_text
+                        )
+                        break
                 continue
             kept.append(citation)
 

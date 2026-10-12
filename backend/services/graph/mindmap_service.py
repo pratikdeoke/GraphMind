@@ -7,6 +7,10 @@ from neo4j import GraphDatabase
 from config.settings import Settings
 from services.vector.milvus_service import get_milvus_service
 from services.encryption.crypto_service import decrypt_node_properties
+from typing import List, Dict, Any, Tuple
+from neo4j import GraphDatabase
+from config.settings import Settings
+from services.vector.milvus_service import get_milvus_service
 
 
 class MindmapService:
@@ -29,6 +33,7 @@ class MindmapService:
         self.milvus_service = get_milvus_service()
 
     def get_user_graph(self, user_id: str, encryption_key: Optional[bytes] = None) -> Tuple[List[Dict], List[Dict]]:
+    def get_user_graph(self, user_id: str) -> Tuple[List[Dict], List[Dict]]:
         """
         Get all nodes and relationships for a user, including vector database entries.
 
@@ -102,6 +107,10 @@ class MindmapService:
                     elif node_type == "Transaction":
                         amount = properties.get("amount", 0)
                         label = f"₹{amount:,.0f}" if amount else "Transaction"
+                    elif node_type == "Expense":
+                        name = properties.get("name", "Expense")
+                        amount = properties.get("monthly_amount", 0)
+                        label = f"{name} ₹{amount:,.0f}/mo" if amount else name
                     else:
                         label = properties.get(
                             "name", properties.get("text", node_type))
@@ -124,6 +133,8 @@ class MindmapService:
                 AND NOT 'RetrievalView' IN labels(b)
                 AND NOT 'RankerFeedback' IN labels(b)
                 AND NOT 'EncryptionCanary' IN labels(b)
+                AND NOT 'RetrievalView' IN labels(b)
+                AND NOT 'RankerFeedback' IN labels(b)
                 RETURN 
                     elementId(r) as rel_id,
                     elementId(a) as source_id,
@@ -221,6 +232,7 @@ class MindmapService:
                 MATCH (n)
                 WHERE (n.user_id = $user_id OR (n:User AND n.id = $user_id))
                 AND NOT 'EncryptionCanary' IN labels(n)
+                WHERE n.user_id = $user_id OR (n:User AND n.id = $user_id)
                 DETACH DELETE n
                 RETURN count(n) as deleted_nodes
                 """

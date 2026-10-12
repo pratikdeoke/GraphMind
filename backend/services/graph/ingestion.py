@@ -47,6 +47,7 @@ class GraphIngestion:
         skip_contradiction_detection: bool = False,
         source_type: str = "chat",
         encryption_key: Optional[bytes] = None
+        source_type: str = "chat"
     ) -> Dict[str, int]:
         """
         Ingest message, facts, nodes and relationships into the graph.
@@ -63,6 +64,7 @@ class GraphIngestion:
                 fields (see crypto_service.FIELDS_TO_ENCRYPT) are encrypted with
                 AES-256-GCM before being written to Neo4j (E2EE at rest).
                 
+            
         Returns:
             Dictionary with counts of nodes and relationships created
         """
@@ -85,6 +87,8 @@ class GraphIngestion:
                     session, user_id, message_text,
                     source_type=source_type, encryption_key=encryption_key
                 )
+                # 2. Create Message node
+                message_id = self._create_message_node(session, user_id, message_text, source_type=source_type)
                 
                 # 3. Create Fact nodes
                 fact_ids = []  # list of (fact_id, fact_text)
@@ -93,6 +97,7 @@ class GraphIngestion:
                         session, user_id, fact, message_id,
                         encryption_key=encryption_key
                     )
+                    fact_id = self._create_fact_node(session, user_id, fact, message_id)
                     if fact_id:
                         fact_ids.append((fact_id, fact.get("text", "")))
                         facts_created += 1
@@ -101,6 +106,7 @@ class GraphIngestion:
                 node_map = {}  # Track created nodes: {type: [id1, id2, ...]}
                 for node in nodes:
                     self._merge_node(session, user_id, node, encryption_key=encryption_key)
+                    self._merge_node(session, user_id, node)
                     nodes_created += 1
                     node_type = node.get("type")
                     node_id = node.get("properties", {}).get("id")
@@ -194,6 +200,9 @@ class GraphIngestion:
         """
         message_id = f"msg_{uuid.uuid4().hex[:12]}"
         stored_text = encrypt_field(text, encryption_key) if encryption_key else text
+    def _create_message_node(self, session, user_id: str, text: str, source_type: str = "chat") -> str:
+        """Create a Message node and link to User."""
+        message_id = f"msg_{uuid.uuid4().hex[:12]}"
         query = """
         MATCH (u:User {id: $user_id})
         CREATE (m:Message {
@@ -224,6 +233,12 @@ class GraphIngestion:
         node. This is an inherent and accepted limitation of encrypting data at
         rest while keeping the key client-side.
         """
+        result = session.run(query, user_id=user_id, message_id=message_id, text=text, source_type=source_type)
+        record = result.single()
+        return record["id"] if record else message_id
+    
+    def _create_fact_node(self, session, user_id: str, fact: Dict[str, Any], message_id: str) -> Optional[str]:
+        """Create a Fact node with deduplication - reinforce if exists."""
         fact_text = fact.get("text", "")
         confidence = fact.get("confidence", 0.8)
         
@@ -236,6 +251,8 @@ class GraphIngestion:
         # Check if fact already exists (deduplication).
         # Under encryption this compares ciphertext and will not match existing
         # nodes (non-deterministic GCM), so new facts are created instead.
+        
+        # Check if fact already exists (deduplication)
         check_query = """
         MATCH (f:Fact {user_id: $user_id})
         WHERE f.text = $fact_text
@@ -243,6 +260,7 @@ class GraphIngestion:
         """
         
         result = session.run(check_query, user_id=user_id, fact_text=stored_fact_text)
+        result = session.run(check_query, user_id=user_id, fact_text=fact_text)
         existing = result.single()
         
         if existing:
@@ -284,6 +302,7 @@ class GraphIngestion:
             message_id=message_id,
             fact_id=fact_id,
             fact_text=stored_fact_text,
+            fact_text=fact_text,
             confidence=confidence
         )
         record = result.single()
@@ -354,6 +373,7 @@ class GraphIngestion:
             print(f"Warning: Could not link transaction to asset: {e}")
     
     def _merge_node(self, session, user_id: str, node: Dict[str, Any], encryption_key: Optional[bytes] = None):
+    def _merge_node(self, session, user_id: str, node: Dict[str, Any]):
         """
         Merge a single node into the graph.
         

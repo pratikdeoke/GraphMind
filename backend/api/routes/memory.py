@@ -178,6 +178,11 @@ async def get_mindmap(
     if not nodes_data and not edges_data:
         # Fall back to pg_user_id for backward compatibility
         nodes_data, edges_data = mindmap_service.get_user_graph(pg_user_id, encryption_key=encryption_key)
+        neo4j_user_id) if neo4j_user_id else ([], [])
+
+    if not nodes_data and not edges_data:
+        # Fall back to pg_user_id for backward compatibility
+        nodes_data, edges_data = mindmap_service.get_user_graph(pg_user_id)
 
     # Convert to Pydantic models
     nodes = [MindmapNode(**node) for node in nodes_data]
