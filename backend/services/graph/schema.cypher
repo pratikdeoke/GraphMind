@@ -43,6 +43,10 @@ CREATE CONSTRAINT event_id_unique IF NOT EXISTS
 FOR (ev:Event)
 REQUIRE ev.id IS UNIQUE;
 
+CREATE CONSTRAINT expense_id_unique IF NOT EXISTS
+FOR (ex:Expense)
+REQUIRE ex.id IS UNIQUE;
+
 CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS
 FOR (c:DocumentChunk)
 REQUIRE c.id IS UNIQUE;

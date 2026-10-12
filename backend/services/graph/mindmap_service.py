@@ -90,6 +90,10 @@ class MindmapService:
                     elif node_type == "Transaction":
                         amount = properties.get("amount", 0)
                         label = f"₹{amount:,.0f}" if amount else "Transaction"
+                    elif node_type == "Expense":
+                        name = properties.get("name", "Expense")
+                        amount = properties.get("monthly_amount", 0)
+                        label = f"{name} ₹{amount:,.0f}/mo" if amount else name
                     else:
                         label = properties.get(
                             "name", properties.get("text", node_type))

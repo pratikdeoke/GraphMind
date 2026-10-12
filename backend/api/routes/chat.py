@@ -10,7 +10,12 @@ from services.database.user_service import UserService
 from services.auth.auth_service import auth_service
 from services.export.classifier import classify_response
 from services.export.extractor import extract_table
+from services.aggregation.expense_aggregator import ExpenseAggregator
 from pydantic import BaseModel
+
+# Aggregator singleton: computes budget totals from chat and caches them
+# so budget questions can be answered deterministically (no LLM math).
+expense_aggregator = ExpenseAggregator()
 
 
 def build_export_fields(retrieved_nodes, response_text):
@@ -34,6 +39,20 @@ def build_export_fields(retrieved_nodes, response_text):
         }
     except Exception:
         return {"response_type": "text", "exportable": ["copy"], "export_data": None}
+
+
+def run_expense_aggregation(neo4j_user_id: str, message: str):
+    """Best-effort: parse financial data from a chat message, compute totals,
+    and persist computed facts to the graph. Never raises into chat.
+
+    Returns the computed totals dict, or None if nothing financial was found.
+    """
+    try:
+        return expense_aggregator.ingest_from_text(neo4j_user_id, message)
+    except Exception as e:
+        print(f"Warning: expense aggregation failed: {e}")
+        return None
+
 
 router = APIRouter()
 
@@ -159,6 +178,10 @@ async def chat_endpoint(
             message=request.message
         )
 
+        # Compute + persist budget totals so they appear in the graph and
+        # can be answered deterministically on later questions.
+        run_expense_aggregation(neo4j_user_id, request.message)
+
         assistant_content = "Financial memory stored successfully."
         memory_storage_data = storage_result
 
@@ -172,6 +195,52 @@ async def chat_endpoint(
         )
 
     elif intent == "QUESTION":
+        # Fast path: deterministic budget answers from computed totals.
+        # This avoids the LLM doing its own (inconsistent) math.
+        cached_totals = expense_aggregator.get_cached_totals(neo4j_user_id)
+        deterministic_answer = None
+        if cached_totals and expense_aggregator.is_budget_question(request.message):
+            deterministic_answer = expense_aggregator.answer_query(
+                request.message, cached_totals
+            )
+
+        if deterministic_answer:
+            answer = deterministic_answer
+            metrics = {
+                "graph_query_ms": 0, "vector_search_ms": 0, "retrieval_ms": 0,
+                "llm_generation_ms": 0,
+            }
+            memory_citations = []
+            assistant_content = answer
+            nodes_retrieved = 0
+            memory_citations_data = None
+            typed_citations = None
+            answer_eval_data = answer_quality_evaluator.evaluate(
+                query=request.message,
+                answer=answer,
+                memory_citations=[],
+                retrieval_metrics=metrics,
+            )
+            response_data = ChatResponse(
+                intent=IntentType.QUESTION,
+                answer=answer,
+                retrieval_metrics=RetrievalMetrics(**metrics),
+                memory_citations=None,
+                answer_evaluation=AnswerEvaluation(**answer_eval_data),
+                **build_export_fields([], answer),
+                message="Answer generated from computed totals."
+            )
+            # Store assistant response, then short-circuit.
+            chat_service.add_message(
+                session_id=session_id, user_id=user_id, role="assistant",
+                content=assistant_content, intent=intent, neo4j_message_id=None,
+                graph_query_ms=0, vector_search_ms=0, retrieval_time_ms=0,
+                llm_generation_time_ms=0, nodes_retrieved=0,
+                memory_storage=None, memory_citations=None,
+                answer_eval_metrics=answer_eval_data,
+            )
+            return response_data
+
         # Handle query retrieval and answer generation
         answer, metrics, memory_citations = retrieval_orchestrator.retrieve_and_answer(
             user_id=neo4j_user_id,
@@ -212,6 +281,9 @@ async def chat_endpoint(
             user_id=neo4j_user_id,
             message=request.message
         )
+
+        # Compute + persist budget totals from this message (graph + cache).
+        run_expense_aggregation(neo4j_user_id, request.message)
 
         answer, metrics, memory_citations = retrieval_orchestrator.retrieve_and_answer(
             user_id=neo4j_user_id,

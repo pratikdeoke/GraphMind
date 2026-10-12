@@ -26,6 +26,10 @@ from services.graph.mindmap_service import mindmap_service
 
 router = APIRouter()
 
+# Media types for file responses (defined before route decorators reference them).
+PDF_MEDIA_TYPE = "application/pdf"
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
 user_service = UserService()
 chat_service = ChatService()
 
@@ -136,11 +140,6 @@ def _build_memory_sections(include: dict) -> list:
         neo4j_user_id) if neo4j_user_id else ([], [])
     if not graph_nodes and pg_user_id:
         graph_nodes, _ = mindmap_service.get_user_graph(pg_user_id)
-
-
-
-PDF_MEDIA_TYPE = "application/pdf"
-XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _download_response(content: bytes, media_type: str, ext: str) -> Response:

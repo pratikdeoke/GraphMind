@@ -27,6 +27,7 @@ const NODE_CONFIG: Record<string, {
   Asset:       { bg: "#0e2016", border: "#2dd4bf", text: "#99f6e4", glow: "rgba(45,212,191,0.45)", icon: "📈" },
   Goal:        { bg: "#201208", border: "#f59e0b", text: "#fde68a", glow: "rgba(245,158,11,0.45)", icon: "🎯" },
   Transaction: { bg: "#1a0f28", border: "#a855f7", text: "#d8b4fe", glow: "rgba(168,85,247,0.45)", icon: "💳" },
+  Expense:     { bg: "#2a1207", border: "#fb923c", text: "#fdba74", glow: "rgba(251,146,60,0.5)", icon: "💸" },
   RiskProfile: { bg: "#220d0d", border: "#f87171", text: "#fca5a5", glow: "rgba(248,113,113,0.45)", icon: "⚠️" },
   Entity:      { bg: "#141418", border: "#64748b", text: "#cbd5e1", glow: "rgba(100,116,139,0.35)", icon: "🔷" },
   Preference:  { bg: "#0e1830", border: "#60a5fa", text: "#bfdbfe", glow: "rgba(96,165,250,0.4)", icon: "⚙️" },
