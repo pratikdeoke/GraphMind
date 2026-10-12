@@ -84,3 +84,7 @@ neo4j/
 data/user_samples/*
 !data/user_samples/.gitkeep
 nul
+
+
+.env
+*.env
