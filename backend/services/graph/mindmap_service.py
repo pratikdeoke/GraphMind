@@ -8,6 +8,11 @@ from config.settings import Settings
 from services.vector.milvus_service import get_milvus_service
 
 
+def _is_number(value: Any) -> bool:
+    """True if value is a real numeric type (not a numeric-looking string)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 class MindmapService:
     """
     Service to retrieve entire graph structure for a user.
@@ -27,12 +32,32 @@ class MindmapService:
 
         self.milvus_service = get_milvus_service()
 
-    def get_user_graph(self, user_id: str) -> Tuple[List[Dict], List[Dict]]:
+    # Storage / internal node labels that should be hidden from the default
+    # "portfolio" visualization so the mindmap stays readable. These remain in
+    # Neo4j for RAG retrieval; they are only filtered out at visualization time.
+    PORTFOLIO_HIDDEN_LABELS = [
+        "Message",
+        "Fact",
+        "DocumentChunk",
+        "VectorEntry",
+        "RetrievalView",
+        "RankerFeedback",
+        "Community",
+    ]
+
+    def get_user_graph(
+        self, user_id: str, view: str = "portfolio"
+    ) -> Tuple[List[Dict], List[Dict]]:
         """
-        Get all nodes and relationships for a user, including vector database entries.
+        Get nodes and relationships for a user for visualization.
 
         Args:
             user_id: User identifier
+            view: "portfolio" (default) hides storage/internal labels such as
+                Message, Fact, DocumentChunk, VectorEntry, RetrievalView,
+                RankerFeedback and Community so only the user's financial
+                world-model (User, Asset, Goal, Transaction, Expense, Entity,
+                Preference) is shown. "full" returns every node.
 
         Returns:
             Tuple of (nodes_list, edges_list)
@@ -43,21 +68,24 @@ class MindmapService:
         nodes = []
         edges = []
 
+        hidden_labels = self.PORTFOLIO_HIDDEN_LABELS if view == "portfolio" else []
+
         try:
             with self.driver.session() as session:
                 # Get all nodes for user (User node + all nodes with user_id)
                 nodes_query = """
                 MATCH (n)
                 WHERE (n.user_id = $user_id OR (n:User AND n.id = $user_id))
-                AND NOT 'RetrievalView' IN labels(n)
-                AND NOT 'RankerFeedback' IN labels(n)
+                AND none(lbl IN $hidden_labels WHERE lbl IN labels(n))
                 RETURN 
                     elementId(n) as node_id,
                     labels(n) as labels,
                     properties(n) as properties
                 """
 
-                result = session.run(nodes_query, user_id=user_id)
+                result = session.run(
+                    nodes_query, user_id=user_id, hidden_labels=hidden_labels
+                )
 
                 node_id_map = {}  # Map internal Neo4j IDs to our IDs
 
@@ -89,11 +117,11 @@ class MindmapService:
                         label = properties.get("name", "Goal")
                     elif node_type == "Transaction":
                         amount = properties.get("amount", 0)
-                        label = f"₹{amount:,.0f}" if amount else "Transaction"
+                        label = f"₹{amount:,.0f}" if _is_number(amount) else "Transaction"
                     elif node_type == "Expense":
                         name = properties.get("name", "Expense")
                         amount = properties.get("monthly_amount", 0)
-                        label = f"{name} ₹{amount:,.0f}/mo" if amount else name
+                        label = f"{name} ₹{amount:,.0f}/mo" if _is_number(amount) else name
                     else:
                         label = properties.get(
                             "name", properties.get("text", node_type))
@@ -110,10 +138,8 @@ class MindmapService:
                 MATCH (a)-[r]->(b)
                 WHERE ((a.user_id = $user_id OR (a:User AND a.id = $user_id))
                 AND (b.user_id = $user_id OR (b:User AND b.id = $user_id)))
-                AND NOT 'RetrievalView' IN labels(a)
-                AND NOT 'RankerFeedback' IN labels(a)
-                AND NOT 'RetrievalView' IN labels(b)
-                AND NOT 'RankerFeedback' IN labels(b)
+                AND none(lbl IN $hidden_labels WHERE lbl IN labels(a))
+                AND none(lbl IN $hidden_labels WHERE lbl IN labels(b))
                 RETURN 
                     elementId(r) as rel_id,
                     elementId(a) as source_id,
@@ -122,7 +148,9 @@ class MindmapService:
                     properties(r) as properties
                 """
 
-                result = session.run(edges_query, user_id=user_id)
+                result = session.run(
+                    edges_query, user_id=user_id, hidden_labels=hidden_labels
+                )
 
                 for record in result:
                     rel_id = record["rel_id"]
@@ -148,9 +176,10 @@ class MindmapService:
         except Exception as e:
             print(f"Error retrieving mindmap from Neo4j: {e}")
 
-        # Add vector database entries as nodes
+        # Add vector database entries as nodes (only in 'full' view; hidden in
+        # portfolio view so they don't clutter the visualization)
         try:
-            if self.milvus_service:
+            if self.milvus_service and view == 'full':
                 vectors = self.milvus_service.get_user_vectors(
                     user_id, limit=50)
 

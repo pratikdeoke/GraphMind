@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useAuth } from "../contexts/AuthContext";
-import { memoryAPI } from "../lib/api";
+import { memoryAPI, type MindmapView } from "../lib/api";
 
 const NODE_CONFIG: Record<string, {
   bg: string; border: string; text: string; glow: string; icon: string;
@@ -186,6 +186,7 @@ export default function Mindmap() {
   const [isClearing, setIsClearing] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [legendVisible, setLegendVisible] = useState(true);
+  const [view, setView] = useState<MindmapView>("portfolio");
 
   const loadMindmap = useCallback(async () => {
     if (!user) return;
@@ -194,7 +195,7 @@ export default function Mindmap() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await memoryAPI.getMindmap();
+      const data = await memoryAPI.getMindmap(view);
       const positioned = hierarchyLayout(data.nodes, data.edges);
       setNodeCount(positioned.length);
       setEdgeCount(data.edges.length);
@@ -242,7 +243,7 @@ export default function Mindmap() {
     } finally {
       setIsLoading(false);
     }
-  }, [user, setNodes, setEdges]);
+  }, [user, view, setNodes, setEdges]);
 
   useEffect(() => { loadMindmap(); }, [loadMindmap]);
 
@@ -302,6 +303,26 @@ export default function Mindmap() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <div
+            className="flex items-center rounded-lg p-0.5"
+            style={{ background: "var(--bg-raised)", border: "1px solid var(--border-subtle)" }}
+            title="Toggle between clean portfolio view and full graph with messages/facts"
+          >
+            {(["portfolio", "full"] as MindmapView[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className="px-2.5 py-1 rounded-md text-xs font-semibold capitalize transition-colors"
+                style={{
+                  background: view === v ? "rgba(139,92,246,0.22)" : "transparent",
+                  color: view === v ? "#c4b5fd" : "var(--text-muted)",
+                }}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+
           {!isLoading && nodes.length > 0 && (
             <div className="hidden sm:flex items-center gap-3">
               {[[nodeCount, "nodes"], [edgeCount, "edges"]].map(([val, lbl]) => (
@@ -389,6 +410,11 @@ export default function Mindmap() {
                   Start chatting to build your financial knowledge graph.
                 </p>
               </div>
+              {view === "portfolio" && (
+                <button onClick={() => setView("full")} className="btn-ghost" style={{ width: "auto", padding: "0.5rem 1.25rem" }}>
+                  Switch to Full view
+                </button>
+              )}
               <button onClick={() => navigate("/chat")} className="btn-primary" style={{ width: "auto", padding: "0.65rem 1.75rem" }}>
                 Go to Chat
               </button>

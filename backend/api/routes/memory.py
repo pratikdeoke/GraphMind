@@ -110,16 +110,25 @@ async def get_mindmap(
     authorization: Optional[str] = Header(
         default=None,
         description="Bearer token. Format: 'Bearer <access_token>'"
-    )
+    ),
+    view: str = "portfolio",
 ):
     """
     Get user's memory graph for visualization.
+
+    Query params:
+        view: "portfolio" (default) shows only the financial world-model
+            (User, Asset, Goal, Transaction, Expense, Entity, Preference) and
+            hides storage/internal nodes (Message, Fact, DocumentChunk,
+            VectorEntry, ...). "full" shows every node including messages,
+            facts and vector entries.
 
     Returns all nodes and edges for the authenticated user's
     knowledge graph, formatted for mindmap visualization.
 
     Args:
         authorization: JWT token in Authorization header
+        view: Visualization view ("portfolio" or "full")
 
     Returns:
         MindmapResponse with nodes and edges
@@ -135,17 +144,21 @@ async def get_mindmap(
             detail="User not found"
         )
 
+    # Normalize view value
+    if view not in ("portfolio", "full"):
+        view = "portfolio"
+
     # Try neo4j_user_id first, then fall back to pg_user_id for backward compatibility
     neo4j_user_id = user.get("neo4j_user_id")
 
     # Get graph data using whichever user_id has data
     # First try neo4j_user_id, then fall back to pg_user_id
     nodes_data, edges_data = mindmap_service.get_user_graph(
-        neo4j_user_id) if neo4j_user_id else ([], [])
+        neo4j_user_id, view=view) if neo4j_user_id else ([], [])
 
     if not nodes_data and not edges_data:
         # Fall back to pg_user_id for backward compatibility
-        nodes_data, edges_data = mindmap_service.get_user_graph(pg_user_id)
+        nodes_data, edges_data = mindmap_service.get_user_graph(pg_user_id, view=view)
 
     # Convert to Pydantic models
     nodes = [MindmapNode(**node) for node in nodes_data]

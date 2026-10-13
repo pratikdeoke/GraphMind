@@ -11,6 +11,7 @@ Handles:
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import uuid
+import hashlib
 from neo4j import GraphDatabase
 from config.settings import Settings
 
@@ -320,50 +321,75 @@ class GraphIngestion:
     
     def _merge_node(self, session, user_id: str, node: Dict[str, Any]):
         """
-        Merge a single node into the graph.
-        
-        Uses MERGE to avoid duplicates.
+        Merge a single node into the graph, deduped by canonical identity.
+
+        The previous implementation MERGEd on a freshly-generated random id,
+        which meant every mention created a NEW node (no dedup ever happened).
+        We now MERGE on (user_id, canonical_name) when a canonical name is
+        available so repeated mentions of the same entity reinforce one node.
+
         Adds user_id, metadata, and reinforcement fields automatically.
         """
         node_type = node.get("type", "Entity")
-        properties = node.get("properties", {})
-        
-        # Ensure node has an ID
-        if "id" not in properties:
-            properties["id"] = f"{node_type.lower()}_{uuid.uuid4().hex[:8]}"
-        
+        properties = node.get("properties", {}) or {}
+
+        # Resolve a canonical dedupe key (shared identity across mentions).
+        canonical = (
+            properties.get("canonical_name")
+            or properties.get("normalized_name")
+            or (properties.get("name") or "").strip().lower()
+            or None
+        )
+
+        # If an id is provided, keep it as the MERGE key so re-ingestion of the
+        # same node id reinforces it. Otherwise dedupe by canonical_name.
+        node_id = properties.get("id")
+        if node_id:
+            merge_match = "{id: $id, user_id: $user_id}"
+            merge_params = {"id": node_id, "user_id": user_id}
+        elif canonical:
+            stable = hashlib.md5(canonical.encode("utf-8")).hexdigest()[:10]
+            node_id = f"{node_type.lower()}_{stable}"
+            properties["id"] = node_id
+            properties["canonical_name"] = canonical
+            merge_match = "{user_id: $user_id, canonical_name: $canonical}"
+            merge_params = {"canonical": canonical, "user_id": user_id}
+        else:
+            node_id = f"{node_type.lower()}_{uuid.uuid4().hex[:8]}"
+            properties["id"] = node_id
+            merge_match = "{id: $id, user_id: $user_id}"
+            merge_params = {"id": node_id, "user_id": user_id}
+
         # Add user_id for isolation
         properties["user_id"] = user_id
-        
+
         # Add metadata fields if not present
         if "source_type" not in properties:
             properties["source_type"] = "user_input"
-        
-        # Create Cypher query with labels and metadata
-        # Note: Only Message has OWNS_MESSAGE edge from User
-        # Fact is linked via Message->DERIVED_FACT->Fact
-        # Transaction is linked via User->MADE_TRANSACTION->Transaction
-        # Asset is linked via Transaction->AFFECTS_ASSET->Asset
+
         query = f"""
-        MERGE (n:{node_type} {{id: $id, user_id: $user_id}})
+        MERGE (n:{node_type} {merge_match})
         ON CREATE SET 
+            n.id = $id,
             n.created_at = datetime(),
             n.timestamp = datetime(),
             n.confidence = 0.8,
             n.reinforcement_count = 0,
             n.last_reinforced = datetime()
-        SET n += $properties, 
+        ON MATCH SET
+            n.reinforcement_count = coalesce(n.reinforcement_count, 0) + 1,
+            n.last_reinforced = datetime()
+        SET n += $properties,
             n.updated_at = datetime()
-        RETURN n
+        RETURN n.id as id
         """
-        
-        session.run(
-            query,
-            id=properties["id"],
-            user_id=user_id,
-            properties=properties
-        )
-    
+        # Build a single params dict (merge_match may reference id/user_id/canonical)
+        run_params = {"id": node_id, "user_id": user_id, "properties": properties}
+        run_params.update(merge_params)
+        result = session.run(query, **run_params)
+        record = result.single()
+        return record["id"] if record else node_id
+
     def _merge_relationship(self, session, user_id: str, relationship: Dict[str, Any]):
         """
         Merge a relationship between two nodes.

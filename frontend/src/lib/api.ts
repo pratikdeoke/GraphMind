@@ -128,9 +128,13 @@ export const chatAPI = {
 };
 
 // Memory/Mindmap API
+export type MindmapView = "portfolio" | "full";
+
 export const memoryAPI = {
-  getMindmap: async () => {
-    const response = await api.get("/memory/mindmap");
+  getMindmap: async (view: MindmapView = "portfolio") => {
+    const response = await api.get("/memory/mindmap", {
+      params: { view },
+    });
     return response.data;
   },
 

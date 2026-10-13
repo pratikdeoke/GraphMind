@@ -54,6 +54,10 @@ class LLMExtractor:
         else:
             self.model = None
     
+    MAX_FACTS_PER_MESSAGE = 5
+    MAX_NODES_PER_MESSAGE = 6
+    MAX_RELS_PER_MESSAGE = 8
+
     def extract(self, text: str, user_id: str) -> Dict[str, List[Dict[str, Any]]]:
         """
         Extract structured entities and relationships from text.
@@ -89,13 +93,28 @@ class LLMExtractor:
                 extracted_data["nodes"] = []
             if "relationships" not in extracted_data:
                 extracted_data["relationships"] = []
-            
-            # Add IDs to nodes if not present
+
+            # Add IDs + canonical names to nodes if not present.
+            # Materialize canonical identity BEFORE compaction so node dedup in
+            # _compact_extraction can key on canonical_name (not random id).
             for node in extracted_data.get("nodes", []):
-                if "id" not in node.get("properties", {}):
-                    if "properties" not in node:
-                        node["properties"] = {}
-                    node["properties"]["id"] = f"{node['type'].lower()}_{uuid.uuid4().hex[:8]}"
+                if "properties" not in node:
+                    node["properties"] = {}
+                props = node["properties"]
+                if "id" not in props:
+                    props["id"] = f"{node['type'].lower()}_{uuid.uuid4().hex[:8]}"
+                # Canonical identity used for MERGE dedupe in ingestion.
+                # LLM may already provide normalized_name; always materialize
+                # canonical_name so ingestion can MERGE on it.
+                raw_name = props.get("name") or props.get("normalized_name") or ""
+                if raw_name and "canonical_name" not in props:
+                    props["canonical_name"] = str(raw_name).strip().lower()
+                if props.get("normalized_name") and "canonical_name" not in props:
+                    props["canonical_name"] = str(props["normalized_name"]).strip().lower()
+
+            # Clean-graph caps: keep viz understandable even for 100-line prompts.
+            # Keep highest-confidence items, drop the long tail.
+            extracted_data = self._compact_extraction(extracted_data)
             
             # Validate and return
             if self.validate_schema(extracted_data):
@@ -106,7 +125,69 @@ class LLMExtractor:
         except Exception as e:
             print(f"Error in LLM extraction: {e}")
             return self._fallback_extraction(text, user_id)
-    
+
+    def _compact_extraction(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Cap extraction size and drop duplicates so the knowledge graph
+        stays clean and visualizable even for very long prompts.
+
+        Rules:
+        - Facts: dedupe by normalized text, keep highest-confidence, cap at
+          MAX_FACTS_PER_MESSAGE.
+        - Nodes: dedupe by canonical identity (label + canonical_name/id),
+          keep first occurrence, cap at MAX_NODES_PER_MESSAGE.
+        - Relationships: dedupe by (type, from, to), cap at MAX_RELS_PER_MESSAGE.
+        """
+        def _conf(item: Dict[str, Any]) -> float:
+            try:
+                return float(item.get("confidence", 0.8) or 0.8)
+            except (TypeError, ValueError):
+                return 0.8
+
+        facts = [f for f in data.get("facts", []) if isinstance(f, dict) and f.get("text")]
+        seen_facts = set()
+        uniq_facts = []
+        for f in facts:
+            key = str(f["text"]).strip().lower()
+            if key and key not in seen_facts:
+                seen_facts.add(key)
+                uniq_facts.append(f)
+        uniq_facts.sort(key=_conf, reverse=True)
+        data["facts"] = uniq_facts[: self.MAX_FACTS_PER_MESSAGE]
+
+        nodes = [n for n in data.get("nodes", []) if isinstance(n, dict)]
+        seen_nodes = set()
+        uniq_nodes = []
+        for n in nodes:
+            props = n.get("properties", {}) or {}
+            ident = (
+                str(props.get("canonical_name") or props.get("normalized_name")
+                    or props.get("id") or props.get("name") or "")
+                .strip().lower()
+            )
+            key = (n.get("type"), ident)
+            if key in seen_nodes:
+                continue
+            seen_nodes.add(key)
+            uniq_nodes.append(n)
+        data["nodes"] = uniq_nodes[: self.MAX_NODES_PER_MESSAGE]
+
+        rels = [r for r in data.get("relationships", []) if isinstance(r, dict)]
+        seen_rels = set()
+        uniq_rels = []
+        for r in rels:
+            key = (
+                r.get("type"),
+                r.get("from_id") or r.get("from_name") or r.get("from_type"),
+                r.get("to_id") or r.get("to_name") or r.get("to_type"),
+            )
+            if key in seen_rels:
+                continue
+            seen_rels.add(key)
+            uniq_rels.append(r)
+        data["relationships"] = uniq_rels[: self.MAX_RELS_PER_MESSAGE]
+
+        return data
+
     def _build_extraction_prompt(self, text: str) -> str:
         """Build the extraction prompt for LLM."""
         return """You are a deterministic memory extraction engine for a user-scoped personal knowledge graph.
@@ -121,6 +202,14 @@ You MUST:
 - Return NO explanation text
 - Return NO markdown
 - Return NO comments
+
+HARD LIMITS (never exceed, even for very long input):
+- At most 5 facts
+- At most 6 nodes total
+- At most 8 relationships
+If the message contains more information than these limits allow, keep only
+the most important/salient items and merge the rest into the facts you keep.
+DO NOT list every minor detail.
 
 ------------------------------------------------------------
 ENTITY TYPES (use only these exact types)

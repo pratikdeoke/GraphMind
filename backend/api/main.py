@@ -1,3 +1,16 @@
+import sys
+
+# Ensure stdout/stderr can encode non-ASCII characters (e.g. the rupee sign ₹,
+# emoji) regardless of the OS locale (Windows defaults to cp1252, which raises
+# UnicodeEncodeError when logging user content). Without this, printing a
+# message containing ₹ crashes the /chat endpoint with an HTTP 500.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        # Stream does not support reconfigure (e.g. already replaced); ignore.
+        pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import health, chat, auth, memory, documents, sidebar, export

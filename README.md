@@ -155,6 +155,16 @@ graphmind/
 
 ## Quick Start
 
+### Windows: Start Everything
+
+After installing the backend and frontend dependencies, run `start_graphmind.bat` from the repository root. It starts the PostgreSQL and Neo4j Docker services, then opens the backend and frontend in separate terminal windows.
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8001`
+- API docs: `http://localhost:8001/docs`
+
+Keep both terminal windows open while using the app. If `backend\.env` does not exist, the launcher copies `backend\.env.example`; configure credentials there as needed.
+
 ### Prerequisites
 
 - Python 3.10+
